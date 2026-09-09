@@ -1,0 +1,15 @@
+---
+- name: Deploy cloudflare-tls secret to GCP cluster
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloudflare-tls
+        namespace: "{{ k8s_namespace }}"
+      type: kubernetes.io/tls
+      data:
+        tls.crt: "{{ cloudflare_tls_cert | b64encode }}"
+        tls.key: "{{ cloudflare_tls_key | b64encode }}"

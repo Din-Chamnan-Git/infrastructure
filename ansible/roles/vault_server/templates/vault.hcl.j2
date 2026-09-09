@@ -1,0 +1,17 @@
+# HashiCorp Vault Configuration File
+ui = true
+
+disable_mlock = true
+
+storage "raft" {
+  path    = "/var/lib/vault/data"
+  node_id = "vault-node-1"
+}
+
+listener "tcp" {
+  address     = "0.0.0.0:8200"
+  tls_disable = 1
+}
+
+api_addr     = "http://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8200"
+cluster_addr = "http://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8201"

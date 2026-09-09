@@ -1,0 +1,16 @@
+# Terraform temporary & binary files
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!example.tfvars
+
+# Kubespray virtualenv & cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Ansible local files
+*.log
+*.retry

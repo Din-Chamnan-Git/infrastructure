@@ -1,0 +1,4 @@
+---
+# Default variables for k8s_secrets role
+k8s_namespace: dnan-prod
+kubeconfig_path: ~/.kube/config-gcp

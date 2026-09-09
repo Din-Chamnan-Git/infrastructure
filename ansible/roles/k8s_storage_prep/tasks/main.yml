@@ -1,0 +1,14 @@
+---
+- name: Install open-iscsi and nfs-common packages
+  ansible.builtin.package:
+    name:
+      - open-iscsi
+      - nfs-common
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Enable and start iscsid service
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started

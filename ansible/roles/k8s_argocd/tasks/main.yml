@@ -1,0 +1,100 @@
+---
+- name: Ensure argocd namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: argocd
+
+- name: Deploy ArgoCD via Helm
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: argocd
+    chart_ref: argo-cd
+    chart_repo_url: https://argoproj.github.io/argo-helm
+    release_namespace: argocd
+    values_files:
+      - "{{ playbook_dir }}/../k8s-manifests/argocd/argocd-values.yaml"
+    state: present
+  register: helm_argocd_res
+  until: helm_argocd_res is succeeded
+  retries: 5
+  delay: 5
+
+
+- name: Copy cloudflare-tls secret to argocd namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloudflare-tls
+        namespace: argocd
+      type: kubernetes.io/tls
+      data:
+        tls.crt: "{{ cloudflare_tls_cert | b64encode }}"
+        tls.key: "{{ cloudflare_tls_key | b64encode }}"
+
+- name: Deploy ArgoCD Traefik Ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: "{{ playbook_dir }}/../k8s-manifests/argocd/argocd-ingress.yaml"
+
+- name: Deploy GitHub Repository Credentials Secret to ArgoCD (For Private Repositories)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: github-repo-infra-k8s
+        namespace: argocd
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      type: Opaque
+      stringData:
+        type: git
+        url: "https://github.com/Din-Chamnan-Git/infra-k8s.git"
+        username: "{{ github_username | default('') }}"
+        password: "{{ github_pat_token | default('') }}"
+
+- name: Deploy ArgoCD GitOps Application Resource (infra-k8s-apps)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: "{{ playbook_dir }}/../k8s-manifests/argocd/infra-k8s-app.yaml"
+
+- name: Deploy ArgoCD GitOps Application Resource (go-demo-api)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: "{{ playbook_dir }}/../k8s-manifests/argocd/go-demo-api-app.yaml"
+
+
+- name: Fetch ArgoCD Initial Admin Password
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    kind: Secret
+    name: argocd-initial-admin-secret
+    namespace: argocd
+  register: argocd_secret
+
+- name: Display ArgoCD Admin Credentials
+  ansible.builtin.debug:
+    msg:
+      - "===================================================="
+      - "🔐 ArgoCD Initial Admin Credentials:"
+      - "  URL:      https://argocd.dnan.tech"
+      - "  Username: admin"
+      - "  Password: {{ argocd_secret.resources[0].data.password | b64decode if (argocd_secret.resources | length > 0) else 'Secret not found or password changed' }}"
+      - "===================================================="
+
+
+

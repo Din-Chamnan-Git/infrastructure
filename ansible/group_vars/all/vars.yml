@@ -1,0 +1,5 @@
+# Global Non-Sensitive Variables
+k8s_namespace: dnan-prod
+kubeconfig_path: ~/.kube/config
+app_domain: app.dnan.tech
+

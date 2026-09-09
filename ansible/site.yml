@@ -1,0 +1,29 @@
+---
+- name: Prepare Worker Hosts for Storage (open-iscsi & nfs-common)
+  hosts: kube_node
+  become: true
+  roles:
+    - role: k8s_storage_prep
+      tags: ['k8s_storage_prep']
+
+- name: Deploy Complete Platform Infrastructure & K8s Applications
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  roles:
+    - role: k8s_secrets
+      tags: ['k8s_secrets']
+    - role: k8s_traefik
+      tags: ['k8s_traefik']
+    - role: k8s_longhorn
+      tags: ['k8s_longhorn']
+    - role: k8s_argocd
+      tags: ['k8s_argocd']
+    - role: k8s_external_secrets
+      tags: ['k8s_external_secrets']
+    - role: k8s_apps
+      tags: ['k8s_apps']

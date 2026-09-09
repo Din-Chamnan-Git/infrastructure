@@ -1,0 +1,47 @@
+---
+- name: Ensure longhorn-system namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: longhorn-system
+
+- name: Deploy Longhorn Helm Chart using declarative values
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: longhorn
+    chart_ref: longhorn
+    chart_repo_url: https://charts.longhorn.io
+    release_namespace: longhorn-system
+    values_files:
+      - "{{ playbook_dir }}/../k8s-manifests/storage/longhorn/longhorn-values.yaml"
+    state: present
+  register: helm_longhorn_res
+  until: helm_longhorn_res is succeeded
+  retries: 5
+  delay: 5
+
+
+- name: Copy cloudflare-tls secret to longhorn-system namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloudflare-tls
+        namespace: longhorn-system
+      type: kubernetes.io/tls
+      data:
+        tls.crt: "{{ cloudflare_tls_cert | b64encode }}"
+        tls.key: "{{ cloudflare_tls_key | b64encode }}"
+
+- name: Deploy Longhorn Traefik Ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: "{{ playbook_dir }}/../k8s-manifests/storage/longhorn/longhorn-ingress.yml"

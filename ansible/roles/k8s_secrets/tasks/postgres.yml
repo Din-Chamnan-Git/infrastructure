@@ -1,0 +1,16 @@
+---
+- name: Deploy postgres-secret to GCP cluster
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: postgres-secret
+        namespace: "{{ k8s_namespace }}"
+      type: Opaque
+      stringData:
+        POSTGRES_DB: "{{ postgres_db_name }}"
+        POSTGRES_USER: "{{ postgres_db_user }}"
+        POSTGRES_PASSWORD: "{{ postgres_db_password }}"

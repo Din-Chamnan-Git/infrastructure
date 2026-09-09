@@ -1,0 +1,26 @@
+---
+- name: Ensure ingress-system namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: ingress-system
+
+- name: Deploy Traefik Ingress Controller via Helm
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: traefik
+    chart_ref: traefik
+    chart_repo_url: https://traefik.github.io/charts
+    release_namespace: ingress-system
+    values_files:
+      - "{{ playbook_dir }}/../k8s-manifests/ingress/traefik-values.yaml"
+    state: present
+  register: helm_traefik_res
+  until: helm_traefik_res is succeeded
+  retries: 5
+  delay: 5
+

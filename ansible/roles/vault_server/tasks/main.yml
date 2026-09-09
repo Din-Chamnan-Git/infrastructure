@@ -1,0 +1,49 @@
+---
+- name: Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - gpg
+      - wget
+      - curl
+      - lsb-release
+    state: present
+    update_cache: yes
+
+- name: Add HashiCorp GPG key
+  ansible.builtin.get_url:
+    url: https://apt.releases.hashicorp.com/gpg
+    dest: /etc/apt/trusted.gpg.d/hashicorp.asc
+    mode: '0644'
+
+- name: Add HashiCorp official APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/trusted.gpg.d/hashicorp.asc] https://apt.releases.hashicorp.com {{ ansible_facts['distribution_release'] }} main"
+    state: present
+
+- name: Install HashiCorp Vault binary
+  ansible.builtin.apt:
+    name: vault
+    state: present
+    update_cache: yes
+
+- name: Ensure Vault data directory exists with correct permissions
+  ansible.builtin.file:
+    path: /var/lib/vault/data
+    state: directory
+    owner: vault
+    group: vault
+    mode: '0750'
+
+- name: Deploy Vault configuration file (vault.hcl)
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: /etc/vault.d/vault.hcl
+    owner: vault
+    group: vault
+    mode: '0640'
+
+- name: Enable and start Vault systemd service
+  ansible.builtin.systemd:
+    name: vault
+    enabled: yes
+    state: restarted
