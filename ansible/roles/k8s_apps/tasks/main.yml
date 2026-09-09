@@ -3,22 +3,22 @@
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/../k8s-manifests/database/postgres-pvc.yaml"
+    src: "{{ playbook_dir }}/../../k8s-platform/database/postgres-pvc.yaml"
 
 - name: Deploy PostgreSQL Headless Service
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/../k8s-manifests/database/postgres-service.yaml"
+    src: "{{ playbook_dir }}/../../k8s-platform/database/postgres-service.yaml"
 
 - name: Deploy PostgreSQL StatefulSet
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/../k8s-manifests/database/postgres-statefulset.yaml"
+    src: "{{ playbook_dir }}/../../k8s-platform/database/postgres-statefulset.yaml"
 
 - name: Deploy Traefik Application Ingress Route
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/../k8s-manifests/networking/ingress.yml"
+    src: "{{ playbook_dir }}/../../k8s-platform/networking/ingress.yml"

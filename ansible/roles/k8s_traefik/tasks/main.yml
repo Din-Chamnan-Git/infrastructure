@@ -17,7 +17,7 @@
     chart_repo_url: https://traefik.github.io/charts
     release_namespace: ingress-system
     values_files:
-      - "{{ playbook_dir }}/../k8s-manifests/ingress/traefik-values.yaml"
+      - "{{ playbook_dir }}/../../k8s-platform/ingress/traefik-values.yaml"
     state: present
   register: helm_traefik_res
   until: helm_traefik_res is succeeded
