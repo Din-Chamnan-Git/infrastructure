@@ -1,0 +1,85 @@
+---
+- name: Install Nginx, OpenSSL, and Certbot packages
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - openssl
+      - certbot
+      - python3-certbot-dns-cloudflare
+    state: present
+    update_cache: yes
+
+- name: Ensure SSL certificate directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/ssl/certs
+    - /etc/ssl/private
+    - /etc/letsencrypt
+
+- name: Deploy Cloudflare API credentials for Certbot (if provided)
+  ansible.builtin.copy:
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token | default('') }}\n"
+    dest: /etc/letsencrypt/cloudflare.ini
+    owner: root
+    group: root
+    mode: '0600'
+  when: cloudflare_api_token | default('') != ''
+
+- name: Issue Let's Encrypt SSL certificate via Certbot DNS-01 for CI/CD subdomains
+  ansible.builtin.command: >
+    certbot certonly --dns-cloudflare
+    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+    --dns-cloudflare-propagation-seconds 60
+    -d {{ jenkins_subdomain | default('jenkins') }}.{{ base_domain | default('dnan.tech') }}
+    -d {{ sonar_subdomain | default('sonar') }}.{{ base_domain | default('dnan.tech') }}
+    -d {{ nexus_subdomain | default('nexus') }}.{{ base_domain | default('dnan.tech') }}
+    -d {{ registry_subdomain | default('registry') }}.{{ base_domain | default('dnan.tech') }}
+    --non-interactive --agree-tos -m {{ cert_email | default('admin@dnan.tech') }}
+  args:
+    creates: "/etc/letsencrypt/live/{{ jenkins_subdomain | default('jenkins') }}.{{ base_domain | default('dnan.tech') }}/fullchain.pem"
+  ignore_errors: true
+  register: certbot_cicd_res
+  when: cloudflare_api_token | default('') != ''
+
+- name: Fallback to Self-Signed SSL Certificate if Certbot not configured or failed
+  ansible.builtin.command: >
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048
+    -keyout /etc/ssl/private/cicd-selfsigned.key
+    -out /etc/ssl/certs/cicd-selfsigned.crt
+    -subj "/CN=*.{{ base_domain | default('dnan.tech') }}"
+    -addext "subjectAltName = DNS:{{ jenkins_subdomain | default('jenkins') }}.{{ base_domain | default('dnan.tech') }},DNS:{{ sonar_subdomain | default('sonar') }}.{{ base_domain | default('dnan.tech') }},DNS:{{ nexus_subdomain | default('nexus') }}.{{ base_domain | default('dnan.tech') }},DNS:{{ registry_subdomain | default('registry') }}.{{ base_domain | default('dnan.tech') }},DNS:localhost"
+  args:
+    creates: /etc/ssl/private/cicd-selfsigned.key
+
+- name: Check if Let's Encrypt certificate file exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ jenkins_subdomain | default('jenkins') }}.{{ base_domain | default('dnan.tech') }}/fullchain.pem"
+  register: le_cert_stat
+
+- name: Determine active SSL certificate paths
+  ansible.builtin.set_fact:
+    ssl_cert_path: "{{ '/etc/letsencrypt/live/' + (jenkins_subdomain | default('jenkins')) + '.' + (base_domain | default('dnan.tech')) + '/fullchain.pem' if (le_cert_stat.stat.exists) else '/etc/ssl/certs/cicd-selfsigned.crt' }}"
+    ssl_key_path: "{{ '/etc/letsencrypt/live/' + (jenkins_subdomain | default('jenkins')) + '.' + (base_domain | default('dnan.tech')) + '/privkey.pem' if (le_cert_stat.stat.exists) else '/etc/ssl/private/cicd-selfsigned.key' }}"
+
+- name: Deploy Nginx SSL reverse proxy configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Test Nginx configuration syntax
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Ensure Nginx service is enabled and restarted
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: yes
+    state: restarted

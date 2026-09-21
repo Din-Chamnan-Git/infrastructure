@@ -9,8 +9,4 @@
       metadata:
         name: "{{ k8s_namespace }}"
 
-- name: Deploy Cloudflare TLS Secrets
-  ansible.builtin.include_tasks: cloudflare.yml
-
-- name: Deploy PostgreSQL Database Secrets
-  ansible.builtin.include_tasks: postgres.yml
+# Secrets (PostgreSQL, GitHub PAT, Docker Registry) are managed dynamically via Vault + External Secrets Operator (vault-eso.yaml)

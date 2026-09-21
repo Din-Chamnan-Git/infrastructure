@@ -14,3 +14,4 @@ __pycache__/
 # Ansible local files
 *.log
 *.retry
+vault_keys.txt

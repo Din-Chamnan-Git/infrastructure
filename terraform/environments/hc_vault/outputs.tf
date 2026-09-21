@@ -10,5 +10,5 @@ output "vault_hostname" {
 
 output "vault_ui_url" {
   description = "Web UI URL for HashiCorp Vault"
-  value       = "http://${cloudflare_record.vault_dns.hostname}:8200"
+  value       = "https://${cloudflare_record.vault_dns.hostname}:8200"
 }

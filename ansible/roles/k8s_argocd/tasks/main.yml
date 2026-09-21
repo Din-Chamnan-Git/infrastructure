@@ -25,20 +25,6 @@
   delay: 5
 
 
-- name: Copy cloudflare-tls secret to argocd namespace
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: cloudflare-tls
-        namespace: argocd
-      type: kubernetes.io/tls
-      data:
-        tls.crt: "{{ cloudflare_tls_cert | b64encode }}"
-        tls.key: "{{ cloudflare_tls_key | b64encode }}"
 
 - name: Deploy ArgoCD Traefik Ingress
   kubernetes.core.k8s:
@@ -46,37 +32,15 @@
     state: present
     src: "{{ playbook_dir }}/../../k8s-platform/argocd/argocd-ingress.yaml"
 
-- name: Deploy GitHub Repository Credentials Secret to ArgoCD (For Private Repositories)
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: github-repo-k8s-platform
-        namespace: argocd
-        labels:
-          argocd.argoproj.io/secret-type: repository
-      type: Opaque
-      stringData:
-        type: git
-        url: "https://github.com/Din-Chamnan-Git/k8s-platform.git"
-        username: "{{ github_username | default('') }}"
-        password: "{{ github_pat_token | default('') }}"
+# Note: GitHub repository secret (github-repo-k8s-platform) is synced dynamically from Vault via ExternalSecrets Operator (vault-eso.yaml)
 
-- name: Deploy ArgoCD GitOps Application Resource (k8s-platform-apps)
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
-    state: present
-    src: "{{ playbook_dir }}/../../k8s-platform/argocd/infra-k8s-app.yaml"
+
 
 - name: Deploy ArgoCD GitOps Application Resource (go-demo-api)
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
     src: "{{ playbook_dir }}/../../k8s-apps/argocd/go-demo-api-app.yaml"
-
 
 - name: Fetch ArgoCD Initial Admin Password
   kubernetes.core.k8s_info:
@@ -85,6 +49,10 @@
     name: argocd-initial-admin-secret
     namespace: argocd
   register: argocd_secret
+  until: argocd_secret.resources | length > 0
+  retries: 10
+  delay: 3
+  ignore_errors: true
 
 - name: Display ArgoCD Admin Credentials
   ansible.builtin.debug:
@@ -95,6 +63,3 @@
       - "  Username: admin"
       - "  Password: {{ argocd_secret.resources[0].data.password | b64decode if (argocd_secret.resources | length > 0) else 'Secret not found or password changed' }}"
       - "===================================================="
-
-
-

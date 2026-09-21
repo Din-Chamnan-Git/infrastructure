@@ -1,0 +1,117 @@
+---
+# Vault Initialization Playbook
+# Runs ONCE on a fresh Vault server to:
+#   1. Initialize Vault (generates unseal keys + root token)
+#   2. Unseal Vault
+#   3. Enable KV v2 secrets engine
+#   4. Save keys locally for reference
+# Safe to re-run: checks initialized state first.
+
+- name: Check if Vault is already initialized
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/init"
+    method: GET
+    validate_certs: false
+  register: vault_init_status
+  retries: 5
+  delay: 5
+  until: vault_init_status.status == 200
+
+- name: Initialize Vault (generate unseal keys and root token)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/init"
+    method: POST
+    validate_certs: false
+    body_format: json
+    body:
+      secret_shares: 5
+      secret_threshold: 3
+    status_code: 200
+  register: vault_init_result
+  when: not vault_init_status.json.initialized
+
+- name: Save Vault init output (unseal keys + root token) to local file
+  ansible.builtin.copy:
+    content: |
+      # ============================================================
+      # HashiCorp Vault - Initial Keys (KEEP SAFE & PRIVATE)
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # ============================================================
+
+      Unseal Key 1: {{ vault_init_result.json.keys_base64[0] }}
+      Unseal Key 2: {{ vault_init_result.json.keys_base64[1] }}
+      Unseal Key 3: {{ vault_init_result.json.keys_base64[2] }}
+      Unseal Key 4: {{ vault_init_result.json.keys_base64[3] }}
+      Unseal Key 5: {{ vault_init_result.json.keys_base64[4] }}
+
+      Root Token: {{ vault_init_result.json.root_token }}
+
+      # To unseal: vault operator unseal <key>  (need 3 of 5)
+      # To use CLI: export VAULT_TOKEN={{ vault_init_result.json.root_token }}
+    dest: "{{ playbook_dir }}/../vault_keys.txt"
+    mode: '0600'
+  become: false
+  delegate_to: localhost
+  when: not vault_init_status.json.initialized
+
+- name: Set unseal keys and root token as facts
+  ansible.builtin.set_fact:
+    vault_unseal_keys: "{{ vault_init_result.json.keys_base64 }}"
+    vault_root_token: "{{ vault_init_result.json.root_token }}"
+  when: not vault_init_status.json.initialized
+
+- name: Unseal Vault (apply 3 of 5 unseal keys)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/unseal"
+    method: POST
+    validate_certs: false
+    body_format: json
+    body:
+      key: "{{ item }}"
+    status_code: 200
+  loop: "{{ vault_unseal_keys[:3] }}"
+  when: not vault_init_status.json.initialized
+
+- name: Wait for Vault to become active after unseal
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: 200
+  register: vault_health
+  until: not vault_health.json.sealed
+  retries: 10
+  delay: 3
+  when: not vault_init_status.json.initialized
+
+- name: Enable KV v2 Secrets Engine at path 'secret/'
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/mounts/secret"
+    method: POST
+    validate_certs: false
+    headers:
+      X-Vault-Token: "{{ vault_root_token }}"
+    body_format: json
+    body:
+      type: kv
+      options:
+        version: "2"
+    status_code: [200, 204, 400]  # 400 = already exists, ok
+  when: not vault_init_status.json.initialized
+
+- name: Display new Vault Root Token
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "🔐 Vault Initialization Complete!"
+      - "   Root Token: {{ vault_root_token }}"
+      - "   Keys saved to: {{ playbook_dir }}/../vault_keys.txt"
+      - "   Next step: Run './infra.sh k8s apps' with this token:"
+      - "   export VAULT_TOKEN={{ vault_root_token }}"
+      - "============================================================"
+  when: not vault_init_status.json.initialized
+
+- name: Vault was already initialized (skipped)
+  ansible.builtin.debug:
+    msg: "Vault is already initialized. Skipping init. Check vault_keys.txt for existing credentials."
+  when: vault_init_status.json.initialized

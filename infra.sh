@@ -9,10 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SSH_KEY="${SSH_KEY_PATH:-$HOME/.ssh/nan-laptop}"
 VAULT_TF_DIR="$SCRIPT_DIR/terraform/environments/hc_vault"
 K8S_TF_DIR="$SCRIPT_DIR/terraform/environments/gcp_dev"
+CICD_TF_DIR="$SCRIPT_DIR/terraform/environments/cicd"
 ANSIBLE_DIR="$SCRIPT_DIR/ansible"
 KUBESPRAY_DIR="$SCRIPT_DIR/kubespray"
 VAULT_INVENTORY="$ANSIBLE_DIR/inventory/hc_vault/inventory.ini"
 K8S_INVENTORY="$KUBESPRAY_DIR/inventory/gcp_dev/inventory.ini"
+CICD_INVENTORY="$ANSIBLE_DIR/inventory/cicd/inventory.ini"
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -155,6 +157,25 @@ PYEOF
     else
         log_warn "K8s Terraform state not found at $K8S_TF_DIR. Skipping K8s inventory update."
     fi
+
+    # 3. Sync CI/CD Server IP
+    if [ -d "$CICD_TF_DIR" ] && [ -f "$CICD_TF_DIR/terraform.tfstate" ]; then
+        log_info "Extracting CI/CD Terraform IP output..."
+        CICD_IP=$(cd "$CICD_TF_DIR" && terraform output -raw cicd_public_ip 2>/dev/null || true)
+        if [ -n "$CICD_IP" ] && [ "$CICD_IP" != "No outputs found" ]; then
+            log_info "Updating CI/CD inventory ($CICD_INVENTORY) with IP: $CICD_IP"
+            mkdir -p "$(dirname "$CICD_INVENTORY")"
+            cat <<EOF > "$CICD_INVENTORY"
+[cicd_hosts]
+$CICD_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY
+EOF
+            log_success "CI/CD inventory updated successfully."
+        else
+            log_warn "CI/CD Terraform state found, but cicd_public_ip output was empty."
+        fi
+    else
+        log_warn "CI/CD Terraform state not found at $CICD_TF_DIR. Skipping CI/CD inventory update."
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -186,6 +207,49 @@ vault_tf_destroy() {
     cd "$VAULT_TF_DIR"
     terraform destroy -auto-approve
     log_success "Vault infrastructure destroyed."
+}
+
+# ------------------------------------------------------------------------------
+# CI/CD Server Subcommands (Jenkins, SonarQube, Nexus, Nginx)
+# ------------------------------------------------------------------------------
+cicd_tf_apply() {
+    log_header "⚡ Phase 4.1: Deploying CI/CD Server Infrastructure with Terraform"
+    cd "$CICD_TF_DIR"
+    terraform init
+    terraform apply -auto-approve
+    log_success "CI/CD server infrastructure applied."
+    sync_inventory_ips
+}
+
+cicd_ansible_setup() {
+    log_header "⚡ Phase 4.2: Configuring CI/CD Server (Jenkins, SonarQube, Nexus, SSL) with Ansible"
+    activate_venv
+    if [ ! -f "$CICD_INVENTORY" ]; then
+        log_warn "CI/CD inventory file missing. Attempting IP sync first..."
+        sync_inventory_ips
+    fi
+
+    CF_TOKEN=""
+    if [ -f "$CICD_TF_DIR/terraform.tfvars" ]; then
+        CF_TOKEN=$(grep -E '^cloudflare_api_token' "$CICD_TF_DIR/terraform.tfvars" | cut -d '=' -f2 | tr -d ' "' || true)
+    fi
+
+    cd "$ANSIBLE_DIR"
+    if [ -n "$CF_TOKEN" ]; then
+        log_info "Cloudflare API token detected. Requesting Let's Encrypt SSL certificates via Certbot..."
+        ansible-playbook -i "$CICD_INVENTORY" cicd_site.yml -e "cloudflare_api_token=$CF_TOKEN"
+    else
+        log_warn "Cloudflare API token not found. Falling back to self-signed SSL..."
+        ansible-playbook -i "$CICD_INVENTORY" cicd_site.yml
+    fi
+    log_success "CI/CD Ansible playbook completed."
+}
+
+cicd_tf_destroy() {
+    log_header "🧹 Destroying CI/CD Infrastructure"
+    cd "$CICD_TF_DIR"
+    terraform destroy -auto-approve
+    log_success "CI/CD infrastructure destroyed."
 }
 
 # ------------------------------------------------------------------------------
@@ -291,6 +355,48 @@ get_argocd_password() {
     fi
 }
 
+get_cicd_credentials() {
+    log_header "🔐 Fetching CI/CD Platform Initial Admin Credentials"
+    
+    if [ ! -f "$CICD_INVENTORY" ]; then
+        log_error "CI/CD inventory file missing. Run './infrastructure/infra.sh cicd apply' first."
+        return 1
+    fi
+
+    CICD_IP=$(grep -E '^[0-9\.]+' "$CICD_INVENTORY" | awk '{print $1}' | head -n 1)
+
+    if [ -z "$CICD_IP" ]; then
+        log_error "Could not determine CI/CD server IP from inventory."
+        return 1
+    fi
+
+    log_info "Connecting to CI/CD server ($CICD_IP) to fetch initial admin passwords..."
+    
+    JENKINS_PASS=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ubuntu@$CICD_IP "sudo cat /opt/jenkins_home/secrets/initialAdminPassword 2>/dev/null" || echo "Installing / Pending...")
+    NEXUS_PASS=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ubuntu@$CICD_IP "sudo cat /opt/nexus-data/admin.password 2>/dev/null" || echo "Installing / Pending...")
+
+    echo ""
+    echo -e "${GREEN}${BOLD}====================================================================${NC}"
+    echo -e "${GREEN}${BOLD} 🔐 CI/CD Platform Initial Admin Credentials:${NC}"
+    echo -e "${GREEN}${BOLD}====================================================================${NC}"
+    echo -e " ⚡ ${BOLD}Jenkins:${NC}"
+    echo -e "    • URL:      ${CYAN}https://jenkins.dnan.tech${NC}"
+    echo -e "    • Username: ${BOLD}admin${NC}"
+    echo -e "    • Password: ${YELLOW}${BOLD}$JENKINS_PASS${NC}"
+    echo ""
+    echo -e " 🔍 ${BOLD}SonarQube:${NC}"
+    echo -e "    • URL:      ${CYAN}https://sonar.dnan.tech${NC}"
+    echo -e "    • Username: ${BOLD}admin${NC}"
+    echo -e "    • Password: ${YELLOW}${BOLD}admin${NC} (Prompts for new password on 1st login)"
+    echo ""
+    echo -e " 📦 ${BOLD}Nexus Repository Manager:${NC}"
+    echo -e "    • URL:      ${CYAN}https://nexus.dnan.tech${NC}"
+    echo -e "    • Username: ${BOLD}admin${NC}"
+    echo -e "    • Password: ${YELLOW}${BOLD}$NEXUS_PASS${NC}"
+    echo -e "${GREEN}${BOLD}====================================================================${NC}"
+    echo ""
+}
+
 # ------------------------------------------------------------------------------
 # System Diagnostics / Status Check
 # ------------------------------------------------------------------------------
@@ -313,21 +419,32 @@ status_check() {
         echo -e "${YELLOW}Not Provisioned${NC}"
     fi
 
-    # 3. Inventory Files
+    # 3. CI/CD TF State
+    echo -n "• CI/CD VM Terraform State: "
+    if [ -f "$CICD_TF_DIR/terraform.tfstate" ]; then
+        echo -e "${GREEN}Present${NC}"
+    else
+        echo -e "${YELLOW}Not Provisioned${NC}"
+    fi
+
+    # 4. Inventory Files
     echo -n "• Vault Inventory: "
     if [ -f "$VAULT_INVENTORY" ]; then echo -e "${GREEN}Found${NC}"; else echo -e "${YELLOW}Missing${NC}"; fi
 
     echo -n "• K8s Inventory: "
     if [ -f "$K8S_INVENTORY" ]; then echo -e "${GREEN}Found${NC}"; else echo -e "${YELLOW}Missing${NC}"; fi
 
-    # 4. SSH Ping Test
+    echo -n "• CI/CD Inventory: "
+    if [ -f "$CICD_INVENTORY" ]; then echo -e "${GREEN}Found${NC}"; else echo -e "${YELLOW}Missing${NC}"; fi
+
+    # 5. SSH Ping Test
     if [ -f "$K8S_INVENTORY" ]; then
         echo -e "\n${BOLD}Testing Node Connectivity (Ansible Ping):${NC}"
         activate_venv
         ansible -i "$K8S_INVENTORY" all -m ping -e "ansible_become=false" --one-line 2>/dev/null || log_warn "Ping test failed or nodes unreachable."
     fi
 
-    # 5. Kubectl Status
+    # 6. Kubectl Status
     echo -e "\n${BOLD}Kubernetes Cluster Status:${NC}"
     if command -v kubectl &>/dev/null && [ -f "$HOME/.kube/config" ]; then
         kubectl get nodes -o wide 2>/dev/null || log_warn "Cannot reach Kubernetes API server (Is SSH tunnel active?)."
@@ -338,9 +455,10 @@ status_check() {
 
 destroy_all() {
     log_header "⚠️ TEARDOWN / DESTROY EVERYTHING ⚠️"
-    echo -e "${RED}${BOLD}WARNING: This action will completely destroy all Vault and Kubernetes infrastructure on GCP!${NC}"
+    echo -e "${RED}${BOLD}WARNING: This action will completely destroy Vault, K8s, and CI/CD infrastructure on GCP!${NC}"
     read -p "Are you sure you want to proceed? (type 'yes' to confirm): " confirm
     if [ "$confirm" == "yes" ]; then
+        cicd_tf_destroy || true
         k8s_tf_destroy || true
         vault_tf_destroy || true
         pkill -f "6443:localhost:6443" || true
@@ -361,48 +479,58 @@ interactive_menu() {
         echo -e "    2) Configure Vault Server (Ansible Setup)"
         echo -e "    3) Destroy Vault Infra (Terraform Destroy)"
         echo ""
+        echo -e "  ${BOLD}CI/CD Server (Jenkins, SonarQube, Nexus):${NC}"
+        echo -e "    4) Provision CI/CD Infra (Terraform Apply)"
+        echo -e "    5) Configure CI/CD Server (Ansible Setup)"
+        echo -e "    6) Destroy CI/CD Infra (Terraform Destroy)"
+        echo ""
         echo -e "  ${BOLD}Kubernetes Cluster & Apps:${NC}"
-        echo -e "    4) Provision K8s Infra VMs (Terraform Apply)"
-        echo -e "    5) Deploy K8s Cluster (Kubespray Playbook)"
-        echo -e "    6) Fetch Kubeconfig & Start SSH Tunnel"
-        echo -e "    7) Deploy Platform & Apps (Ansible site.yml)"
-        echo -e "    8) Destroy K8s Infra VMs (Terraform Destroy)"
+        echo -e "    7) Provision K8s Infra VMs (Terraform Apply)"
+        echo -e "    8) Deploy K8s Cluster (Kubespray Playbook)"
+        echo -e "    9) Fetch Kubeconfig & Start SSH Tunnel"
+        echo -e "   10) Deploy Platform & Apps (Ansible site.yml)"
+        echo -e "   11) Destroy K8s Infra VMs (Terraform Destroy)"
         echo ""
         echo -e "  ${BOLD}Utilities & Lifecycle:${NC}"
-        echo -e "    9) 🔄 Sync Terraform IPs -> Ansible Inventories"
-        echo -e "   10) 📊 Run Health Check & Diagnostics"
-        echo -e "   11) 🔐 Fetch ArgoCD Initial Admin Password"
-        echo -e "   12) 🚀 Full Deployment (Vault -> K8s -> Apps)"
-        echo -e "   13) 🧹 Teardown / Destroy Everything"
+        echo -e "   12) 🔄 Sync Terraform IPs -> Ansible Inventories"
+        echo -e "   13) 📊 Run Health Check & Diagnostics"
+        echo -e "   14) 🔐 Fetch ArgoCD Initial Admin Password"
+        echo -e "   15) 🚀 Full Deployment (Vault -> CI/CD -> K8s -> Apps)"
+        echo -e "   16) 🧹 Teardown / Destroy Everything"
         echo -e "    0) Exit"
         echo ""
-        read -p "Select an option [0-13]: " opt
+        read -p "Select an option [0-16]: " opt
 
         case $opt in
             1) vault_tf_apply ;;
             2) vault_ansible_setup ;;
             3) vault_tf_destroy ;;
-            4) k8s_tf_apply ;;
-            5) k8s_deploy_cluster ;;
-            6) k8s_setup_kubeconfig ;;
-            7) k8s_deploy_apps ;;
-            8) k8s_tf_destroy ;;
-            9) sync_inventory_ips ;;
-            10) status_check ;;
-            11) get_argocd_password ;;
-            12)
+            4) cicd_tf_apply ;;
+            5) cicd_ansible_setup ;;
+            6) cicd_tf_destroy ;;
+            7) k8s_tf_apply ;;
+            8) k8s_deploy_cluster ;;
+            9) k8s_setup_kubeconfig ;;
+            10) k8s_deploy_apps ;;
+            11) k8s_tf_destroy ;;
+            12) sync_inventory_ips ;;
+            13) status_check ;;
+            14) get_argocd_password ;;
+            15)
                 log_info "Starting full end-to-end deployment..."
                 vault_tf_apply
                 vault_ansible_setup
+                cicd_tf_apply
+                cicd_ansible_setup
                 k8s_tf_apply
                 k8s_deploy_cluster
                 k8s_setup_kubeconfig
                 k8s_deploy_apps
                 log_success "Full deployment finished successfully!"
                 ;;
-            13) destroy_all ;;
+            16) destroy_all ;;
             0) echo -e "\nGoodbye! 👋\n"; exit 0 ;;
-            *) log_error "Invalid option '$opt'. Please choose 0-13." ;;
+            *) log_error "Invalid option '$opt'. Please choose 0-16." ;;
         esac
 
         echo ""
@@ -424,6 +552,14 @@ case "$1" in
             *) log_error "Usage: $0 vault [apply|setup|destroy]" ;;
         esac
         ;;
+    cicd)
+        case "$2" in
+            tf-apply|apply) cicd_tf_apply ;;
+            setup|ansible)  cicd_ansible_setup ;;
+            tf-destroy|destroy) cicd_tf_destroy ;;
+            *) log_error "Usage: $0 cicd [apply|setup|destroy]" ;;
+        esac
+        ;;
     k8s)
         case "$2" in
             tf-apply|apply)     k8s_tf_apply ;;
@@ -436,6 +572,9 @@ case "$1" in
         ;;
     argocd-pass|argocd|argocd-password)
         get_argocd_password
+        ;;
+    cicd-pass|cicd-credentials|cicd-password)
+        get_cicd_credentials
         ;;
     sync-ip|sync)
         sync_inventory_ips
@@ -456,12 +595,16 @@ case "$1" in
         echo "  vault apply           Provision Vault VM (Terraform)"
         echo "  vault setup           Configure Vault server (Ansible)"
         echo "  vault destroy         Destroy Vault VM"
+        echo "  cicd apply            Provision CI/CD VM (Terraform)"
+        echo "  cicd setup            Configure CI/CD server stack (Ansible)"
+        echo "  cicd destroy          Destroy CI/CD VM"
         echo "  k8s apply             Provision K8s VMs (Terraform)"
         echo "  k8s cluster           Provision K8s cluster (Kubespray)"
         echo "  k8s kubeconfig        Fetch kubeconfig & start SSH tunnel"
         echo "  k8s apps              Deploy platform & apps (Ansible)"
         echo "  k8s destroy           Destroy K8s VMs"
         echo "  argocd-pass           Fetch ArgoCD initial admin password"
+        echo "  cicd-pass             Fetch CI/CD initial admin passwords (Jenkins, Sonar, Nexus)"
         echo "  sync-ip               Sync Terraform outputs to inventory.ini files"
         echo "  status                Run health checks and status diagnostics"
         echo "  destroy-all           Teardown all resources"

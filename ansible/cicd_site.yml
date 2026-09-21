@@ -1,0 +1,14 @@
+---
+- name: Deploy CI/CD Toolchain Stack (Jenkins, SonarQube, Nexus)
+  hosts: cicd_hosts
+  become: yes
+  roles:
+    - role: jenkins
+      tags: ['jenkins']
+    - role: sonarqube
+      tags: ['sonarqube']
+    - role: nexus
+      tags: ['nexus']
+    - role: nginx_proxy
+      tags: ['nginx_proxy', 'ssl']
+

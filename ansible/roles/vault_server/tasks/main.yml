@@ -6,6 +6,9 @@
       - wget
       - curl
       - lsb-release
+      - openssl
+      - certbot
+      - python3-certbot-dns-cloudflare
     state: present
     update_cache: yes
 
@@ -34,6 +37,72 @@
     group: vault
     mode: '0750'
 
+- name: Ensure /etc/letsencrypt directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Deploy Cloudflare API credentials for Certbot
+  ansible.builtin.copy:
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token | default('') }}\n"
+    dest: /etc/letsencrypt/cloudflare.ini
+    owner: root
+    group: root
+    mode: '0600'
+  when: cloudflare_api_token | default('') != ''
+
+- name: Issue Let's Encrypt SSL certificate for vault.dnan.tech via Certbot DNS-01
+  ansible.builtin.command: >
+    certbot certonly --dns-cloudflare
+    --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+    -d vault.dnan.tech
+    --non-interactive --agree-tos -m admin@dnan.tech
+  args:
+    creates: /etc/letsencrypt/live/vault.dnan.tech/fullchain.pem
+  ignore_errors: true
+  register: certbot_res
+  when: cloudflare_api_token | default('') != ''
+
+- name: Fallback to Self-Signed TLS if Certbot fails or token not provided
+  ansible.builtin.command: >
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048
+    -keyout /etc/vault.d/vault.key
+    -out /etc/vault.d/vault.crt
+    -subj "/CN=vault-server"
+    -addext "subjectAltName = IP:{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }},IP:127.0.0.1,DNS:vault.dnan.tech,DNS:localhost"
+  args:
+    creates: /etc/vault.d/vault.key
+
+- name: Copy Let's Encrypt certificate to /etc/vault.d/ if issued
+  ansible.builtin.copy:
+    src: "/etc/letsencrypt/live/vault.dnan.tech/{{ item.src }}"
+    dest: "/etc/vault.d/{{ item.dest }}"
+    remote_src: yes
+    owner: vault
+    group: vault
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: 'fullchain.pem', dest: 'vault.crt', mode: '0644' }
+    - { src: 'privkey.pem', dest: 'vault.key', mode: '0600' }
+  when: certbot_res is defined and certbot_res is succeeded and (cloudflare_api_token | default('') != '')
+
+- name: Set Vault TLS key permissions
+  ansible.builtin.file:
+    path: /etc/vault.d/vault.key
+    owner: vault
+    group: vault
+    mode: '0600'
+
+- name: Set Vault TLS cert permissions
+  ansible.builtin.file:
+    path: /etc/vault.d/vault.crt
+    owner: vault
+    group: vault
+    mode: '0644'
+
 - name: Deploy Vault configuration file (vault.hcl)
   ansible.builtin.template:
     src: vault.hcl.j2
@@ -47,3 +116,17 @@
     name: vault
     enabled: yes
     state: restarted
+
+- name: Wait for Vault API to become available
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:8200/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429, 472, 473, 501, 503]  # any response = Vault is up
+  register: vault_ready
+  retries: 15
+  delay: 5
+  until: vault_ready.status in [200, 429, 472, 473, 501, 503]
+
+- name: Initialize and unseal Vault
+  ansible.builtin.include_tasks: init.yml

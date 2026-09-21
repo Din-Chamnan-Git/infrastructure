@@ -9,9 +9,11 @@ storage "raft" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:8200"
-  tls_disable = 1
+  address       = "0.0.0.0:8200"
+  tls_disable   = 0
+  tls_cert_file = "/etc/vault.d/vault.crt"
+  tls_key_file  = "/etc/vault.d/vault.key"
 }
 
-api_addr     = "http://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8200"
-cluster_addr = "http://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8201"
+api_addr     = "https://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8200"
+cluster_addr = "https://{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}:8201"

@@ -25,20 +25,7 @@
   delay: 5
 
 
-- name: Copy cloudflare-tls secret to longhorn-system namespace
-  kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: cloudflare-tls
-        namespace: longhorn-system
-      type: kubernetes.io/tls
-      data:
-        tls.crt: "{{ cloudflare_tls_cert | b64encode }}"
-        tls.key: "{{ cloudflare_tls_key | b64encode }}"
+
 
 - name: Deploy Longhorn Traefik Ingress
   kubernetes.core.k8s:

@@ -1,0 +1,57 @@
+---
+- name: Ensure prerequisite packages are installed
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - python3-pip
+    state: present
+    update_cache: yes
+
+- name: Ensure Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: Ensure Jenkins deployment directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/jenkins
+    - "{{ jenkins_home_dir | default('/opt/jenkins_home') }}"
+
+- name: Set permissions on Jenkins home directory
+  ansible.builtin.file:
+    path: "{{ jenkins_home_dir | default('/opt/jenkins_home') }}"
+    owner: "1000"
+    group: "1000"
+    mode: '0755'
+    recurse: no
+
+- name: Deploy Jenkins docker-compose.yml configuration
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/jenkins/docker-compose.yml
+    mode: '0644'
+
+- name: Start Jenkins container via Docker Compose
+  ansible.builtin.shell: docker compose up -d || docker-compose up -d
+  args:
+    chdir: /opt/jenkins
+  register: jenkins_compose_res
+  changed_when: "'Creating' in jenkins_compose_res.stdout or 'Starting' in jenkins_compose_res.stdout or 'Recreating' in jenkins_compose_res.stdout"
+
+- name: Install Docker CLI binary inside Jenkins container
+  ansible.builtin.shell: |
+    docker exec -u 0 jenkins sh -c "curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz | tar zxvf - --strip-components=1 -C /usr/local/bin docker/docker"
+  changed_when: false
+
+- name: Install SonarQube Scanner CLI inside Jenkins container
+  ansible.builtin.shell: |
+    docker exec -u 0 jenkins sh -c "apt-get update && apt-get install -y unzip && curl -fsSL https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip -o /tmp/sonar.zip && unzip -q -o /tmp/sonar.zip -d /opt && ln -sf /opt/sonar-scanner-6.2.1.4610-linux-x64/bin/sonar-scanner /usr/local/bin/sonar-scanner"
+  changed_when: false
+
+

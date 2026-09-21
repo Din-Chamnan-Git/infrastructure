@@ -1,0 +1,38 @@
+---
+- name: Ensure prerequisite packages are installed
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+    state: present
+    update_cache: yes
+
+- name: Ensure Nexus directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/nexus
+    - "{{ nexus_data_dir | default('/opt/nexus-data') }}"
+
+- name: Set ownership permissions on Nexus data directory (nexus user UID 200)
+  ansible.builtin.file:
+    path: "{{ nexus_data_dir | default('/opt/nexus-data') }}"
+    owner: "200"
+    group: "200"
+    mode: '0755'
+    recurse: no
+
+- name: Deploy Nexus docker-compose.yml configuration
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/nexus/docker-compose.yml
+    mode: '0644'
+
+- name: Start Nexus container via Docker Compose
+  ansible.builtin.shell: docker compose up -d || docker-compose up -d
+  args:
+    chdir: /opt/nexus
+  register: nexus_compose_res
+  changed_when: "'Creating' in nexus_compose_res.stdout or 'Starting' in nexus_compose_res.stdout or 'Recreating' in nexus_compose_res.stdout"

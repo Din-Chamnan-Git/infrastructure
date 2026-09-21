@@ -1,0 +1,49 @@
+---
+- name: Ensure prerequisite packages are installed
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+    state: present
+    update_cache: yes
+
+- name: Configure Linux kernel parameters for SonarQube (vm.max_map_count)
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: '524288'
+    state: present
+    reload: yes
+
+- name: Configure Linux kernel parameters for SonarQube (fs.file-max)
+  ansible.posix.sysctl:
+    name: fs.file-max
+    value: '131072'
+    state: present
+    reload: yes
+
+- name: Ensure SonarQube directories exist with correct permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: '0755'
+  loop:
+    - /opt/sonarqube
+    - "{{ sonarqube_data_dir | default('/opt/sonarqube/data') }}"
+    - "{{ sonarqube_extensions_dir | default('/opt/sonarqube/extensions') }}"
+    - "{{ sonarqube_logs_dir | default('/opt/sonarqube/logs') }}"
+    - "{{ sonarqube_db_dir | default('/opt/sonarqube/postgresql') }}"
+
+- name: Deploy SonarQube docker-compose.yml configuration
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/sonarqube/docker-compose.yml
+    mode: '0644'
+
+- name: Start SonarQube stack via Docker Compose
+  ansible.builtin.shell: docker compose up -d || docker-compose up -d
+  args:
+    chdir: /opt/sonarqube
+  register: sonarqube_compose_res
+  changed_when: "'Creating' in sonarqube_compose_res.stdout or 'Starting' in sonarqube_compose_res.stdout or 'Recreating' in sonarqube_compose_res.stdout"

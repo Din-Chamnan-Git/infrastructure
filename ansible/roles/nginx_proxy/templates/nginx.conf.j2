@@ -1,0 +1,107 @@
+events {
+    worker_connections {{ worker_connections | default(1024) }};
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+    error_log   /var/log/nginx/error.log warn;
+
+    sendfile        on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
+    keepalive_timeout  65;
+    types_hash_max_size 2048;
+    client_max_body_size {{ client_max_body_size | default('0') }};
+
+    # Global HTTP to HTTPS Redirect
+    server {
+        listen 80;
+        server_name _;
+        return 301 https://$host$request_uri;
+    }
+
+    # 1. Jenkins Subdomain
+    server {
+        listen 443 ssl;
+        server_name {{ jenkins_subdomain | default('jenkins') }}.{{ base_domain | default('dnan.tech') }};
+
+        ssl_certificate     {{ ssl_cert_path | default('/etc/ssl/certs/cicd-selfsigned.crt') }};
+        ssl_certificate_key {{ ssl_key_path  | default('/etc/ssl/private/cicd-selfsigned.key') }};
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass          {{ jenkins_upstream | default('http://127.0.0.1:8080') }};
+            proxy_set_header    Host $host;
+            proxy_set_header    X-Real-IP $remote_addr;
+            proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header    X-Forwarded-Proto https;
+        }
+    }
+
+    # 2. SonarQube Subdomain
+    server {
+        listen 443 ssl;
+        server_name {{ sonar_subdomain | default('sonar') }}.{{ base_domain | default('dnan.tech') }};
+
+        ssl_certificate     {{ ssl_cert_path | default('/etc/ssl/certs/cicd-selfsigned.crt') }};
+        ssl_certificate_key {{ ssl_key_path  | default('/etc/ssl/private/cicd-selfsigned.key') }};
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass          {{ sonar_upstream | default('http://127.0.0.1:9000') }};
+            proxy_set_header    Host $host;
+            proxy_set_header    X-Real-IP $remote_addr;
+            proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header    X-Forwarded-Proto https;
+        }
+    }
+
+    # 3. Nexus UI Subdomain
+    server {
+        listen 443 ssl;
+        server_name {{ nexus_subdomain | default('nexus') }}.{{ base_domain | default('dnan.tech') }};
+
+        ssl_certificate     {{ ssl_cert_path | default('/etc/ssl/certs/cicd-selfsigned.crt') }};
+        ssl_certificate_key {{ ssl_key_path  | default('/etc/ssl/private/cicd-selfsigned.key') }};
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass          {{ nexus_upstream | default('http://127.0.0.1:8081') }};
+            proxy_set_header    Host $host;
+            proxy_set_header    X-Real-IP $remote_addr;
+            proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header    X-Forwarded-Proto https;
+        }
+    }
+
+    # 4. Nexus Docker Registry Subdomain
+    server {
+        listen 443 ssl;
+        server_name {{ registry_subdomain | default('registry') }}.{{ base_domain | default('dnan.tech') }};
+
+        ssl_certificate     {{ ssl_cert_path | default('/etc/ssl/certs/cicd-selfsigned.crt') }};
+        ssl_certificate_key {{ ssl_key_path  | default('/etc/ssl/private/cicd-selfsigned.key') }};
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        client_max_body_size {{ client_max_body_size | default('0') }};
+
+        location / {
+            proxy_pass          {{ registry_upstream | default('http://127.0.0.1:8082') }};
+            proxy_set_header    Host $host;
+            proxy_set_header    X-Real-IP $remote_addr;
+            proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header    X-Forwarded-Proto https;
+        }
+    }
+}

@@ -1,0 +1,18 @@
+---
+base_domain: "dnan.tech"
+cert_email: "admin@dnan.tech"
+
+worker_connections: 1024
+client_max_body_size: "0"
+
+jenkins_subdomain: "jenkins"
+jenkins_upstream: "http://127.0.0.1:8080"
+
+sonar_subdomain: "sonar"
+sonar_upstream: "http://127.0.0.1:9000"
+
+nexus_subdomain: "nexus"
+nexus_upstream: "http://127.0.0.1:8081"
+
+registry_subdomain: "registry"
+registry_upstream: "http://127.0.0.1:8082"
