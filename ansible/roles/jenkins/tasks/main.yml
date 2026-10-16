@@ -7,6 +7,10 @@
       - python3-pip
     state: present
     update_cache: yes
+  register: apt_install_res
+  retries: 10
+  delay: 6
+  until: apt_install_res is succeeded
 
 - name: Ensure Docker service is enabled and running
   ansible.builtin.systemd:

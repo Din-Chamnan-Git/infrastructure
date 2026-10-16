@@ -13,7 +13,7 @@ output "master_nodes" {
   value       = module.master_nodes.nodes
 }
 
-output "worker_nodes" {
-  description = "Worker node instance IPs"
-  value       = module.worker_nodes.nodes
-}
+# output "worker_nodes" {
+#   description = "Worker node instance IPs"
+#   value       = module.worker_nodes.nodes
+# }

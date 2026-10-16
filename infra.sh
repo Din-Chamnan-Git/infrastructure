@@ -197,8 +197,20 @@ vault_ansible_setup() {
         log_warn "Vault inventory file missing. Attempting IP sync first..."
         sync_inventory_ips
     fi
+
+    CF_TOKEN=""
+    if [ -f "$VAULT_TF_DIR/terraform.tfvars" ]; then
+        CF_TOKEN=$(grep -E '^cloudflare_api_token' "$VAULT_TF_DIR/terraform.tfvars" | cut -d '=' -f2 | tr -d ' "' || true)
+    fi
+
     cd "$ANSIBLE_DIR"
-    ansible-playbook -i "$VAULT_INVENTORY" vault_site.yml
+    if [ -n "$CF_TOKEN" ]; then
+        log_info "Cloudflare API token detected. Requesting Let's Encrypt SSL certificates via Certbot..."
+        ansible-playbook -i "$VAULT_INVENTORY" vault_site.yml -e "cloudflare_api_token=$CF_TOKEN"
+    else
+        log_warn "Cloudflare API token not found. Falling back to self-signed SSL..."
+        ansible-playbook -i "$VAULT_INVENTORY" vault_site.yml
+    fi
     log_success "Vault Ansible playbook completed."
 }
 

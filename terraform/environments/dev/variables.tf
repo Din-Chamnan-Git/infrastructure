@@ -64,16 +64,16 @@ variable "subnet_2_availability_zone" {
   description = "Second Availability zone"
 }
 
-variable "cloudflare_api_token" {
-  type        = string
-  sensitive   = true
-  description = "Cloudflare API Token with DNS edit permissions"
-}
+# variable "cloudflare_api_token" {
+#   type        = string
+#   sensitive   = true
+#   description = "Cloudflare API Token with DNS edit permissions"
+# }
 
-variable "domain_name" {
-  type        = string
-  description = "The root domain managed in Cloudflare (e.g. example.com)"
-}
+# variable "domain_name" {
+#   type        = string
+#   description = "The root domain managed in Cloudflare (e.g. example.com)"
+# }
 
 variable "subdomain" {
   type        = string

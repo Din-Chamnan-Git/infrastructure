@@ -14,6 +14,7 @@
     kubeconfig: "{{ kubeconfig_path }}"
     name: traefik
     chart_ref: traefik
+    chart_version: "41.7.1"  # Pinned: last version supporting k8s >=1.25 (42.0.0+ requires >=1.30)
     chart_repo_url: https://traefik.github.io/charts
     release_namespace: ingress-system
     values_files:

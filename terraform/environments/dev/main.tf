@@ -36,22 +36,22 @@ module "master_nodes" {
   key_name          = aws_key_pair.k8s_key.key_name
 }
 
-# 4. K8s Worker Nodes (EC2 Module)
-module "worker_nodes" {
-  source            = "../../modules/aws/ec2"
-  subnet_id         = module.vpc.subnet_id
-  security_group_id = module.security_group.worker_sg_id
-  environment       = var.environment
-  nodes             = var.worker_nodes
-  key_name          = aws_key_pair.k8s_key.key_name
-}
+# # 4. K8s Worker Nodes (EC2 Module)
+# module "worker_nodes" {
+#   source            = "../../modules/aws/ec2"
+#   subnet_id         = module.vpc.subnet_id
+#   security_group_id = module.security_group.worker_sg_id
+#   environment       = var.environment
+#   nodes             = var.worker_nodes
+#   key_name          = aws_key_pair.k8s_key.key_name
+# }
 
-# 5. Application Load Balancer
-module "alb" {
-  source            = "../../modules/aws/alb"
-  environment       = var.environment
-  vpc_id            = module.vpc.vpc_id
-  public_subnet_ids = module.vpc.subnet_ids
-  domain_name       = var.domain_name
-  subdomain         = var.subdomain
-}
+# # 5. Application Load Balancer
+# module "alb" {
+#   source            = "../../modules/aws/alb"
+#   environment       = var.environment
+#   vpc_id            = module.vpc.vpc_id
+#   public_subnet_ids = module.vpc.subnet_ids
+#   domain_name       = var.domain_name
+#   subdomain         = var.subdomain
+# }
